@@ -1,0 +1,280 @@
+---
+title: "Tutoriel R2D2 - Exercices"
+author: "Sébastien Déjean, Xavier Gendre"
+date: "22/06/2016"
+output:
+  html_document:
+    css: r2d2_exo.css
+  pdf_document: default
+---
+
+## jsonlite
+
+### Unlock a bike. Unlock New York.
+
+* Importer les données relatives aux stations de vélo de la ville de New York. Elles sont disponibles à l'adresse http://citibikenyc.com/stations/json. 
+
+```{r eval=FALSE, echo=FALSE, results='hide'}
+library(jsonlite)
+citibike <- fromJSON("http://citibikenyc.com/stations/json")
+stations <- citibike$stationBeanList
+stations$stationName
+```
+
+* Explorer l'objet créé dans R.
+
+* Combien y a-t-il de stations ?
+
+```{r eval=FALSE, echo=FALSE, results='hide'}
+dim(citibike$stationBeanList)
+```
+
+* Utiliser la fonction stream_in pour importer les données ligne par ligne.
+
+```{r eval=FALSE, echo=FALSE, results='hide'}
+citibike.stream <- stream_in(url("http://feeds.citibikenyc.com/stations/stations.json"))
+```
+
+* Ajouter un _handler_ pour n'importer que les stations qui proposent au moins 50 vélos.
+
+```{r eval=FALSE, echo=FALSE, results='hide'}
+MaFonction <- function(df){
+  message(nrow(df), " ligne(s) lue(s)")
+  df <- df$stationBeanList[[1]]
+  df <- df[df$totalDocks>50,]
+  message(nrow(df), " ligne(s) conservée(s)")
+  stream_out(df, file("stations_50.json"), verbose=FALSE)
+}
+```
+
+```{r eval=FALSE, echo=FALSE, results='hide'}
+citibike.stream.50 <- stream_in(url("http://feeds.citibikenyc.com/stations/stations.json"), handler = MaFonction)
+```
+
+Dans les 2 questions qui précèdent, on peut constater que l'utilisation de `stream_in` n'est pas forcément judicieuse car les données sont présentées dans un tableau qui n'occupe qu'une seule ligne. 
+
+* On reprend les mêmes manipulations mais cette fois-ci avec un fichier qui contient les données sur plusieurs lignes. On peut le construire avec... `stream_out`
+```{r eval=FALSE, echo=TRUE, results='hide'}
+citibike <- fromJSON("http://citibikenyc.com/stations/json")
+stations <- citibike$stationBeanList
+stream_out(stations, file("stations2.json"))
+```
+
+```{r eval=FALSE, echo=FALSE, results='hide'}
+citibike.stream <- stream_in(file("stations2.json"))
+```
+
+* Pour celles et ceux qui regrettent d'avoir choisi ce tutoriel plutôt que celui sur la cartographie : représenter la position des stations sur une carte de New York (avec le package `ggmap` par exemple).
+
+```{r echo=FALSE, eval=FALSE, results = 'hide', fig=FALSE}
+library(ggmap)
+NYMap = qmap(location = "New York")
+NYMap +
+  geom_point(aes(x=longitude, y=latitude),
+             data=stations)
+```
+
+### Recettes de cuisine
+
+Les règles d'utilisation de l'API http://www.recipepuppy.com/about/api/ sont les suivantes :
+```{r echo=TRUE, eval=FALSE}
+For example : http://www.recipepuppy.com/api/?i=onions,garlic&q=omelet&p=3
+Optional Parameters:
+* i : comma delimited ingredients
+* q : normal search query
+* p : page
+* format=xml : if you want xml instead of json 
+```
+
+* Importer au format JSON les recettes contenant des _potatoes_ (ou tout autre ingrédient de votre choix). Récupérer plusieurs pages si nécessaire.
+```{r echo=FALSE, eval=FALSE}
+recipe1 <- fromJSON("http://www.recipepuppy.com/api/?q=potato&p=1&format=json")
+recipe2 <- fromJSON("http://www.recipepuppy.com/api/?q=potato&p=2&format=json")
+```
+
+* Faut-il mettre de l'ail (_garlic_) dans la recette du _Tofu Creamed Spinach_ ?
+```{r echo=FALSE, eval=FALSE}
+recipe.spinach <- fromJSON("http://www.recipepuppy.com/api/?q=spinach&format=json")
+recipe.spinach$results[10,]
+```
+
+### Si vous n'en avez pas assez de Star Wars
+
+On va s'intéresser à une autre source d'information concernant l'univers Star Wars : http://swapi.co/
+
+L'API disponible ici fournit plusieurs bases de données concernant les planètes, les vaisseaux, les véhicules, les personnages, les films et les espèces.
+
+* Importer les données relatives aux planètes sur lesquelles se déroule l'histoire de Star Wars. Commencer par la commande :
+
+```{r echo=TRUE, eval=FALSE}
+SW.planet.1 <- fromJSON("http://swapi.co/api/planets/?format=json")
+```
+
+* Explorer l'objet `SW.planet`. Quel est son type ? Que contient-il ?
+
+* Combien de planètes sont stockées dans l'objet `SW.planet` ?
+
+```{r echo=TRUE, eval=FALSE}
+dim(SW.planet.1$results)
+```
+
+* Combien de planètes sont effectivement disponibles dans la base proposée via l'API http://swapi.co ?
+
+```{r echo=TRUE, eval=FALSE}
+SW.planet.1$count
+```
+
+* On peut accéder à des informations supplémentaires en important d'autres pages. Par exemple :
+```{r echo=TRUE, eval=FALSE}
+SW.planet.2 <- fromJSON("http://swapi.co/api/planets/?format=json&page=2")
+```
+
+* Importer l'ensemble des pages relatives aux 61 planètes. La fonction `rbind.pages` peut-être utile.
+
+```{r echo=FALSE, eval=FALSE}
+SW.planet.tmp <- fromJSON("http://swapi.co/api/planets/?format=json")
+i = 1
+pages <- list()
+while (!is.null(SW.planet.tmp$`next`))
+{
+  SW.planet.tmp <- fromJSON(
+    paste0("http://swapi.co/api/planets/?format=json&page=",i))
+  message("Retrieving page ",i)
+  pages[[i]] <- SW.planet.tmp$results
+  i <- i+1
+}
+SW.planet <- rbind.pages(pages)
+nrow(SW.planet)
+```
+
+
+## mongolite
+
+### En utilisant la collection Star Wars col_people
+
+En créant la collection MongoDB dans sa version _propre_ :
+
+```{r echo=TRUE, eval=FALSE}
+clean_df <- function(df) {
+  df$height <- suppressWarnings(as.double(df$height))
+  df$mass <- suppressWarnings(as.double(gsub(",", "", df$mass)))
+  df$films <- lapply(df$films,
+                     function(films) { sort(as.integer(substr(films, 27, 27))) })
+  return(df)
+
+  i <- 0
+repeat {
+  i <- i + 1
+  content <- fromJSON(paste0("http://swapi.co/api/people/?page=", i))
+  col_people$insert(clean_df(content$results))
+  if (is.null(content$`next`)) break
+}
+```
+
+Voici quelques questions que vous pourriez résoudre avec des requêtes MongoDB :
+
+*  Y a-t-il des blondes dans SW ?
+```{r echo=FALSE, eval=FALSE}
+col_people$distinct("hair_color")
+
+col_people$find(query = '{"gender" : "female", "hair_color":"blonde"}')
+
+col_people$find(query = '{"gender" : "female", "hair_color":"blonde"}',
+                fields = '{"_id":0,"name":1, "hair_color":1}')
+```
+
+* Combien mesure le personnage hermaphrodite ?
+```{r echo=FALSE, eval=FALSE}
+col_people$find(query = '{"gender" : "hermaphrodite"}', fields = '{"_id":0, "name" : 1, "height" : 1}')
+```
+
+* Lister le nom des personnages de l'épisodes 7 ?
+
+```{r echo=FALSE, eval=FALSE}
+col_people$find(query = '{"films" : "http://swapi.co/api/films/7/"}', fields = '{"_id":0, "name" : 1}')
+```
+
+* Représenter un diagramme en bâtons du nombre de personnages qui apparaissent de 1 à 7 fois dans les épisodes.
+
+```{r echo=FALSE, eval=FALSE}
+films <- col_people$find(fields = '{"_id":0, "films" : 1}')
+nb.films <- apply(films, 1, function(x){length(x[[1]])})
+tab <- table(nb.films)
+barplot(tab)
+```
+
+* Quel personnage apparaît dans les 7 épisodes de la saga ?
+
+```{r echo=FALSE, eval=FALSE}
+col_people$find(query='{"films": {"$all": [1,2,3,4,5,6,7]} }', fields=ffilms)
+```
+
+
+### Unlock a bike. Unlock New York. (le retour)
+
+* Créer une collection __col_citybike__
+```{r echo=FALSE, eval=FALSE}
+col_citybike <- mongo(collection="bike", verbose=FALSE)
+col_citybike$count()
+```
+
+* Insérer dans cette collection les données recueillies précédemment et vérifier le nombre de stations.
+```{r echo=FALSE, eval=FALSE}
+obj <- fromJSON("http://citibikenyc.com/stations/json")
+col_citybike$insert(obj$stationBeanList)
+col_citybike$count()
+```
+
+* Quel est le nombre moyen d'emplacements (totalDocks) pour vélo sur l'ensemble des stations ? 
+
+```{r echo=FALSE, eval=FALSE}
+df.res <- col_citybike$find(fields='{"_id":0, "totalDocks":1}')
+apply(df.res,2,mean)
+```
+
+* Combien de stations disposent de plus de 50 emplacements pour les vélos ? Récupérer le nom de ces stations ainsi que le nombre d'emplacements.
+```{r echo=FALSE, eval=FALSE}
+res <- col_citybike$find(query='{"totalDocks": {"$gt":50} }', fields='{"_id":0, "totalDocks":1, "stationName":1}')
+dim(res)
+```
+
+* Effectuer le même calcul qu'à la question précédente en utilisant un pipeline d'agrégation.
+```{r echo=FALSE, eval=FALSE}
+col_citybike$aggregate('[
+  { "$match": {"totalDocks": {"$gt":50} } },
+  { "$group": { "_id": null, "count": { "$sum": 1 } } }
+]')
+```
+
+## Quelques autres sources de données 
+
+Voici quelques adresses renvoyant vers des API fournissant des données au format JSON que vous pouvez vous amuser à manipuler.
+
+### Nature
+
+Le service _OpenSearch_ présenté ici http://www.nature.com/opensearch/ fournit un moyen de récupérer, au format JSON par exemple, les informations du site http://nature.com.
+
+Par exemple, pour récupérer au format JSON les informations relatives à des articles à partir du mot-clé _Darwin_, on pourra utiliser la requête suivante :
+http://www.nature.com/opensearch/request?query=darwin&httpAccept=application/json
+
+Voir une description de l'API ici :http://www.nature.com/developers/documentation/api-references/opensearch-api/
+
+### The Open Movie Database
+
+Le site Open Movie Database propose une API pour rechercher dans une base de données de films. Le système est décrit ici : http://omdbapi.com. Par exemple, la requête http://www.omdbapi.com/?s=men&r=json qui demande les films dont le titre contient le mot _men_ renverra, au format JSON, les nombreux déclinaisons de la série des _X-men_. Mais vous pouvez aussi chercher à partir des mots-clés _star_ ou _wars_.
+
+### Open library
+
+Le projet Open Library https://openlibrary.org propose un catalogue de livres. Il dispose de plusieurs API décrites ici : https://openlibrary.org/developers/api
+
+Par exemple, pour rechercher un ouvrage à partir de son ISBN :
+https://openlibrary.org/api/books?bibkeys=ISBN:0201558025&format=json
+
+ou pour chercher des ouvrages liés à D. Knuth :
+http://openlibrary.org/search.json?author=knuth
+
+### Des sources d'API sur des thèmes divers et variés
+
+* Le site http://www.programmableweb.com est une source qui recense un grand nombre d'API susceptibles de fournir des données au format JSON. Le site propose plus de 15 000 API (chiffre relevé le 15 juin 2016). Un moteur de recherche est accesible ici http://www.programmableweb.com/apis/directory. Il est possible de préciser le format JSON dans la requête.
+
+* La plateforme Wikia propose une API afin d'effectuer des requêtes sur les sites wiki qu'elle héberge. Les modalités sont décrites ici : http://api.wikia.com. Nous avons déjà utilisé ce système via le site http://starwars.wikia.com. N'hésitez pas à explorer la plateforme et à travailler sur un wiki qui vous inspire.
